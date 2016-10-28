@@ -19,6 +19,8 @@ variable3 .rs 1
 variable4 .rs 1
 variable5 .rs 2
 
+buttons_pressed .rs 8
+
   .bank 0
   .org $C000
 
@@ -211,16 +213,39 @@ LoadSpritesLoop:
   STA PPU_MASK
 
 INFINITY:
+
+;; Read the input from the user to change state of the buttons_pressed
+;; array so that when NMI gets called the sprite data will be updated
+  JSR ReadControllerInput
+
   JMP INFINITY
 
 NMI:
+  ; Save the state of A, X, Y
+  PHA
+  TXA
+  PHA
+  TYA
+  PHA
+
   LDA #$00
   STA $2003       ; set the low byte (00) of the RAM address
   LDA #$02
   STA $4014       ; set the high byte (02) of the RAM address, start the transfer
 
-  ; Read the input from the user to change the sprite palette(s)
-  JSR ReadControllerInput
+  ; Update the graphics using the buttons_pressed variable
+  LDX #$00
+  LDY #$00
+ButtonGraphics_loop:
+  LDA buttons_pressed, y
+  STA $0202, x
+  TXA
+  CLC
+  ADC #$04
+  TAX
+  INY
+  CPY #$08
+  BNE ButtonGraphics_loop
 
   LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
   STA PPU_CTRL
@@ -229,6 +254,15 @@ NMI:
   LDA #$00        ;;tell the ppu there is no background scrolling
   STA PPU_SCROLL
   STA PPU_SCROLL
+
+;; Restore the states for A, X, Y (in the reverse order because the last item
+;; pushed on stack was in the order Y,X,A)
+  PLA
+  TAY
+  PLA
+  TAX
+  PLA
+
   RTI
 
 ; Function to display text on screen
@@ -255,7 +289,9 @@ Display_Text_Loop:
   BNE Display_Text_Loop
   RTS
 
-; Check player one input
+; Check player one input and store the states of the button in buttons_pressed
+; which is an array of 8 bytes
+; Order of button reading is.. A, B, Select, Start, Up, Down, Left, Right
 ReadControllerInput:
   LDA #$01
   STA $4016
@@ -268,16 +304,13 @@ ReadControllerInputLoop:
   AND #$01
   BEQ ButtonNotPressed ; Branch when eqaul to 0
   LDA #$01
-  STA $0202, y
-  JMP ButtonPressed
+  STA buttons_pressed, y
+  JMP CheckNextButtonIfAny
 ButtonNotPressed:
   LDA #$00
-  STA $0202, y
-ButtonPressed:
-  TYA
-  CLC
-  ADC #$04
-  TAY
+  STA buttons_pressed, y
+CheckNextButtonIfAny:
+  INY
   INX
   CPX #$08
   BNE ReadControllerInputLoop
